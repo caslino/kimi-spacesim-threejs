@@ -13,6 +13,7 @@ export interface HUDData {
   panelStatus: string
   flashlight: boolean
   headlights: boolean
+  target: string | null
 }
 
 export class SpaceEngine {
@@ -48,6 +49,8 @@ export class SpaceEngine {
   private flashlightEnabled: boolean
   private headlightsEnabled: boolean
   private rcsActive: boolean
+  private targetBody: string | null = null
+  private targetLockTime: number = 0
   private starMaterial: THREE.ShaderMaterial | null = null
   private mobileSteering: { yaw: number; pitch: number }
   private readonly BASE_SPEED = 50.0 // km/s
@@ -79,6 +82,8 @@ export class SpaceEngine {
     this.flashlightEnabled = false
     this.headlightsEnabled = false
     this.rcsActive = false
+    this.targetBody = null
+    this.targetLockTime = 0
     this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
     this.mobileSteering = { yaw: 0, pitch: 0 }
   }
@@ -350,6 +355,10 @@ export class SpaceEngine {
         this.brakesActive = !this.brakesActive
       }
       
+      if (e.key === 't' || e.key === 'T') {
+        this.cycleTarget()
+      }
+      
       if (e.key === 'r' || e.key === 'R') {
         this.camera.position.set(0, 5, 15)
       }
@@ -527,6 +536,7 @@ export class SpaceEngine {
       panelStatus: this.brakesActive ? 'DEPLOYED' : 'RETRACTED',
       flashlight: this.flashlightEnabled,
       headlights: this.headlightsEnabled,
+      target: this.targetBody,
     })
   }
 
@@ -581,6 +591,27 @@ export class SpaceEngine {
 
   getAudio(): AudioEngine {
     return this.audio
+  }
+
+  setTarget(name: string | null) {
+    this.targetBody = name
+    this.targetLockTime = name ? Date.now() : 0
+    if (name) {
+      this.audio.playSonarPing()
+    }
+  }
+
+  cycleTarget() {
+    const bodies = Array.from(this.celestialBodies.keys())
+    if (bodies.length === 0) return
+    
+    const currentIndex = this.targetBody ? bodies.indexOf(this.targetBody) : -1
+    const nextIndex = (currentIndex + 1) % bodies.length
+    this.setTarget(bodies[nextIndex])
+  }
+
+  getTarget(): string | null {
+    return this.targetBody
   }
 
   executeCommand(cmd: string): string {

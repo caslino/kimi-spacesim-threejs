@@ -49,10 +49,10 @@ export function HUD({ data, onToggleAudio, onToggleManual, onToggleTerminal }: H
         </div>
         
         <div style={styles.readout}>
-          <div style={styles.label}>SCANNER</div>
-          <div style={{ ...styles.value, fontSize: '11px' }}>
-            {data.nearestBody.name || 'SCANNING...'}<br/>
-            {data.nearestBody.distance > 0 ? `${data.nearestBody.distance.toFixed(2)} AU` : ''}
+          <div style={styles.label}>TARGET</div>
+          <div style={{ ...styles.value, fontSize: '11px', color: data.target ? '#ffaa00' : '#00ffc8' }}>
+            {data.target || 'NONE'}<br/>
+            {data.target && data.nearestBody.name === data.target ? `${data.nearestBody.distance.toFixed(2)} AU` : ''}
           </div>
         </div>
       </div>

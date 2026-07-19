@@ -26,6 +26,7 @@ function App() {
     panelStatus: 'RETRACTED',
     flashlight: false,
     headlights: false,
+    target: null as string | null,
   })
 
   useEffect(() => {
