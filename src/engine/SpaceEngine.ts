@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { AudioEngine } from './AudioEngine'
+import { createStarShaderMaterial } from '../shaders/starShader'
 
 export interface HUDData {
   speed: number
@@ -47,7 +48,7 @@ export class SpaceEngine {
   private flashlightEnabled: boolean
   private headlightsEnabled: boolean
   private rcsActive: boolean
-  private isMobile: boolean
+  private starMaterial: THREE.ShaderMaterial | null = null
   private mobileSteering: { yaw: number; pitch: number }
   private readonly BASE_SPEED = 50.0 // km/s
   private readonly ACCEL_TIME = 30.0 // seconds
@@ -141,6 +142,8 @@ export class SpaceEngine {
     const geometry = new THREE.BufferGeometry()
     const positions = new Float32Array(count * 3)
     const colors = new Float32Array(count * 3)
+    const scales = new Float32Array(count)
+    const twinkleSpeeds = new Float32Array(count)
 
     const colorPalette = [
       new THREE.Color(1.0, 1.0, 1.0),
@@ -163,19 +166,18 @@ export class SpaceEngine {
       colors[i * 3] = color.r
       colors[i * 3 + 1] = color.g
       colors[i * 3 + 2] = color.b
+      
+      scales[i] = 0.5 + Math.random() * 2.0
+      twinkleSpeeds[i] = 0.5 + Math.random() * 2.0
     }
 
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    geometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3))
+    geometry.setAttribute('aScale', new THREE.BufferAttribute(scales, 1))
+    geometry.setAttribute('aTwinkleSpeed', new THREE.BufferAttribute(twinkleSpeeds, 1))
 
-    const material = new THREE.PointsMaterial({
-      size: 2,
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.8,
-    })
-
-    const stars = new THREE.Points(geometry, material)
+    this.starMaterial = createStarShaderMaterial()
+    const stars = new THREE.Points(geometry, this.starMaterial)
     this.scene.add(stars)
   }
 
@@ -200,10 +202,12 @@ export class SpaceEngine {
       else if (name === 'Venus') color = 0xffcc88
 
       const material = new THREE.MeshStandardMaterial({ 
-        color,
-        emissive: type === 'Star' ? color : 0x000000,
-        emissiveIntensity: type === 'Star' ? 1.0 : 0.0
-      })
+      color,
+      emissive: type === 'Star' ? color : 0x000000,
+      emissiveIntensity: type === 'Star' ? 1.0 : 0.0,
+      roughness: 0.8,
+      metalness: 0.2,
+    })
 
       const mesh = new THREE.Mesh(geometry, material)
       
@@ -222,6 +226,20 @@ export class SpaceEngine {
 
       this.solarSystem.add(mesh)
       this.celestialBodies.set(name, mesh)
+      
+      // Add ring marker
+      if (type !== 'Star') {
+        const ringGeo = new THREE.RingGeometry(visualRadius * 1.5, visualRadius * 1.6, 32)
+        const ringMat = new THREE.MeshBasicMaterial({
+          color: 0x00ffc8,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.15,
+        })
+        const ring = new THREE.Mesh(ringGeo, ringMat)
+        ring.rotation.x = Math.PI / 2
+        mesh.add(ring)
+      }
     }
   }
 
@@ -406,6 +424,10 @@ export class SpaceEngine {
     this.updateHUD()
     
     this.renderer.render(this.scene, this.camera)
+    
+    if (this.starMaterial) {
+      this.starMaterial.uniforms.uTime.value = this.clock.getElapsedTime()
+    }
     
     if (Date.now() - this.lastSave > 60000) {
       this.saveState()
