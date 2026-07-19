@@ -1,0 +1,12 @@
+object_id,group_id,object_name,object_type,parent_id,semi_major_axis_au,orbit_period_days,orbit_inclination_deg,orbit_eccentricity,initial_angle_rad,radius_km,color_hex,axial_rotation_period_days,render_model_path
+sun_1,solar_system,Sun,Star,,0.0,0.0,0.0,0.0,0.0,696340.0,0xfffaed,25.05,assets/models/universe/Sun/
+Mercury_1,solar_system,Mercury,Planet,sun_1,0.387,87.97,7.0,0.2056,0.5,2439.7,0x9e9e9e,58.65,assets/models/universe/mercurio/
+Venus_1,solar_system,Venus,Planet,sun_1,0.723,224.7,3.39,0.0068,1.2,6051.8,0xe3bb76,-243.02,assets/models/universe/venus/
+Earth_1,solar_system,Earth,Planet,sun_1,1.0,365.256,0.0,0.0167,2.0,6371.0,0x2f7fd6,0.9973,assets/models/universe/Earth/
+Moon_1,solar_system,Moon,Moon,Earth_1,0.00257,27.32,5.14,0.0549,0.0,1737.4,0xcccccc,27.32,assets/models/universe/Moon/
+Mars_1,solar_system,Mars,Planet,sun_1,1.524,686.98,1.85,0.0934,3.1,3389.5,0xc1440e,1.026,assets/models/universe/mars/
+Jupiter_1,solar_system,Jupiter,Planet,sun_1,5.203,4332.59,1.303,0.0484,4.0,69911.0,0xd8ca9d,0.4135,assets/models/universe/Jupiter/
+Saturn_1,solar_system,Saturn,Planet,sun_1,9.582,10759.22,2.489,0.0541,4.8,58232.0,0xe2bf7d,0.4440,assets/models/universe/saturno/
+Uranus_1,solar_system,Uranus,Planet,sun_1,19.218,30688.5,0.773,0.0472,5.5,25362.0,0xbbf0f3,-0.7183,assets/models/universe/urano/
+Neptune_1,solar_system,Neptune,Planet,sun_1,30.047,60182.0,1.77,0.0086,6.1,24622.0,0x274687,0.6713,assets/models/universe/neptuno/
+Pluto_1,solar_system,Pluto,Planet,sun_1,39.482,90560.0,17.16,0.2488,0.3,1188.3,0xa58570,-6.387,assets/models/universe/pluto/
