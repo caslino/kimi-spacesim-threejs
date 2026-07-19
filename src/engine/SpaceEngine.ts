@@ -47,8 +47,8 @@ export class SpaceEngine {
   private flashlightEnabled: boolean
   private headlightsEnabled: boolean
   private rcsActive: boolean
-  
-  // Physics constants
+  private isMobile: boolean
+  private mobileSteering: { yaw: number; pitch: number }
   private readonly BASE_SPEED = 50.0 // km/s
   private readonly ACCEL_TIME = 30.0 // seconds
   private readonly MAX_ANGULAR_SPEED = 8 * (Math.PI / 180) // rad/s
@@ -78,6 +78,8 @@ export class SpaceEngine {
     this.flashlightEnabled = false
     this.headlightsEnabled = false
     this.rcsActive = false
+    this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+    this.mobileSteering = { yaw: 0, pitch: 0 }
   }
 
   async init() {
@@ -428,8 +430,8 @@ export class SpaceEngine {
     this.ship.position.add(displacement)
     this.distanceTraveled += this.shipVelocity.length() * deltaTime
     
-    const yaw = (this.keys.has('ArrowLeft') ? 1 : 0) - (this.keys.has('ArrowRight') ? 1 : 0)
-    const pitch = (this.keys.has('ArrowDown') ? 1 : 0) - (this.keys.has('ArrowUp') ? 1 : 0)
+    const yaw = this.isMobile ? this.mobileSteering.yaw : (this.keys.has('ArrowLeft') ? 1 : 0) - (this.keys.has('ArrowRight') ? 1 : 0)
+    const pitch = this.isMobile ? this.mobileSteering.pitch : (this.keys.has('ArrowDown') ? 1 : 0) - (this.keys.has('ArrowUp') ? 1 : 0)
     
     if ((yaw !== 0 || pitch !== 0) && !this.rcsActive) {
       this.rcsActive = true
@@ -540,6 +542,23 @@ export class SpaceEngine {
 
   setCommandCallback(callback: (cmd: string) => void) {
     this.commandCallback = callback
+  }
+
+  setMobileSteering(yaw: number, pitch: number) {
+    this.mobileSteering = { yaw, pitch }
+  }
+
+  setThrustPercent(value: number) {
+    this.thrustPercent = Math.max(0, Math.min(100, value))
+    this.audio.setThrust(this.thrustPercent)
+  }
+
+  toggleBrakes() {
+    this.brakesActive = !this.brakesActive
+  }
+
+  isMobileDevice(): boolean {
+    return this.isMobile
   }
 
   executeCommand(cmd: string): string {

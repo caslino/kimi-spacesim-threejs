@@ -4,6 +4,7 @@ import { HUD } from './components/HUD'
 import { BootSequence } from './components/BootSequence'
 import { CommandTerminal } from './components/CommandTerminal'
 import { FlightManual } from './components/FlightManual'
+import { MobileControls } from './components/MobileControls'
 
 function App() {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -11,6 +12,7 @@ function App() {
   const [bootComplete, setBootComplete] = useState(false)
   const [terminalOpen, setTerminalOpen] = useState(false)
   const [manualOpen, setManualOpen] = useState(false)
+  const [showMobile, setShowMobile] = useState(false)
   const [hudData, setHudData] = useState({
     speed: 0,
     thrust: 0,
@@ -29,6 +31,7 @@ function App() {
       setHudData(data)
     })
     engineRef.current = engine
+    setShowMobile(engine.isMobileDevice())
     
     engine.setCommandCallback((cmd) => {
       if (cmd === '__OPEN__') setTerminalOpen(true)
@@ -66,6 +69,21 @@ function App() {
     return engineRef.current.executeCommand(cmd)
   }
 
+  const handleThrustChange = (value: number) => {
+    if (!engineRef.current) return
+    engineRef.current.setThrustPercent(value)
+  }
+
+  const handleSteering = (yaw: number, pitch: number) => {
+    if (!engineRef.current) return
+    engineRef.current.setMobileSteering(yaw, pitch)
+  }
+
+  const handleBrakeToggle = () => {
+    if (!engineRef.current) return
+    engineRef.current.toggleBrakes()
+  }
+
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
@@ -83,6 +101,13 @@ function App() {
             onClose={() => setTerminalOpen(false)}
           />
           <FlightManual isOpen={manualOpen} onClose={() => setManualOpen(false)} />
+          {showMobile && (
+            <MobileControls
+              onThrustChange={handleThrustChange}
+              onSteering={handleSteering}
+              onBrakeToggle={handleBrakeToggle}
+            />
+          )}
         </>
       )}
     </div>
