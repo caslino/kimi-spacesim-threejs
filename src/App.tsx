@@ -126,7 +126,12 @@ function App() {
       
       {bootComplete && (
         <>
-          <HUD data={hudData} />
+          <HUD 
+            data={hudData} 
+            onToggleAudio={() => engineRef.current?.getAudio().toggleMute()}
+            onToggleManual={() => setManualOpen(prev => !prev)}
+            onToggleTerminal={() => setTerminalOpen(prev => !prev)}
+          />
           <CommandTerminal
             isOpen={terminalOpen}
             onExecute={handleCommand}

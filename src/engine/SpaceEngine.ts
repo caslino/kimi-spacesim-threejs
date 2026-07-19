@@ -579,8 +579,8 @@ export class SpaceEngine {
     this.brakesActive = !this.brakesActive
   }
 
-  isMobileDevice(): boolean {
-    return this.isMobile
+  getAudio(): AudioEngine {
+    return this.audio
   }
 
   executeCommand(cmd: string): string {
