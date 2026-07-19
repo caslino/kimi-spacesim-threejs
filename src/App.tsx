@@ -5,10 +5,14 @@ import { BootSequence } from './components/BootSequence'
 import { CommandTerminal } from './components/CommandTerminal'
 import { FlightManual } from './components/FlightManual'
 import { MobileControls } from './components/MobileControls'
+import { LoadingScreen } from './components/LoadingScreen'
 
 function App() {
   const containerRef = useRef<HTMLDivElement>(null)
   const engineRef = useRef<SpaceEngine | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadProgress, setLoadProgress] = useState(0)
+  const [loadStatus, setLoadStatus] = useState('INITIALIZING')
   const [bootComplete, setBootComplete] = useState(false)
   const [terminalOpen, setTerminalOpen] = useState(false)
   const [manualOpen, setManualOpen] = useState(false)
@@ -38,7 +42,30 @@ function App() {
       if (cmd === '__CLOSE__') setTerminalOpen(false)
     })
     
-    engine.init()
+    // Simulate loading progress
+    const steps = [
+      { progress: 10, status: 'LOADING ASSETS' },
+      { progress: 30, status: 'BUILDING STARFIELD' },
+      { progress: 50, status: 'GENERATING SOLAR SYSTEM' },
+      { progress: 70, status: 'LOADING SHIP MODEL' },
+      { progress: 90, status: 'INITIALIZING AUDIO' },
+      { progress: 100, status: 'READY' },
+    ]
+    
+    let stepIndex = 0
+    const progressInterval = setInterval(() => {
+      if (stepIndex < steps.length) {
+        setLoadProgress(steps[stepIndex].progress)
+        setLoadStatus(steps[stepIndex].status)
+        stepIndex++
+      } else {
+        clearInterval(progressInterval)
+      }
+    }, 400)
+    
+    engine.init().then(() => {
+      setLoading(false)
+    })
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.key === '?' || e.key === 'F1') && !terminalOpen) {
@@ -53,6 +80,7 @@ function App() {
     window.addEventListener('keydown', handleKeyDown)
 
     return () => {
+      clearInterval(progressInterval)
       window.removeEventListener('keydown', handleKeyDown)
       engine.destroy()
       engineRef.current = null
@@ -88,7 +116,11 @@ function App() {
     <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
       
-      {!bootComplete && (
+      {loading && (
+        <LoadingScreen progress={loadProgress} status={loadStatus} />
+      )}
+      
+      {!loading && !bootComplete && (
         <BootSequence onComplete={handleBootComplete} />
       )}
       
