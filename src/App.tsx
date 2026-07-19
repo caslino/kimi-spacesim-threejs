@@ -29,6 +29,8 @@ function App() {
     headlights: false,
     target: null as string | null,
     perfMode: false,
+    discoveries: 0,
+    missions: [] as { title: string; completed: boolean }[],
   })
 
   useEffect(() => {

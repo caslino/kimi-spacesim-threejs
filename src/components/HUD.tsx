@@ -56,6 +56,27 @@ export function HUD({ data, onToggleAudio, onToggleManual, onToggleTerminal, onT
             {data.target && data.nearestBody.name === data.target ? `${data.nearestBody.distance.toFixed(2)} AU` : ''}
           </div>
         </div>
+        
+        <div style={styles.readout}>
+          <div style={styles.label}>DISCOVERIES</div>
+          <div style={{ ...styles.value, fontSize: '14px', color: '#ffaa00' }}>
+            {data.discoveries} <span style={styles.unit}>bodies</span>
+          </div>
+        </div>
+      </div>
+      
+      {/* Right Panel - Missions */}
+      <div style={styles.rightPanel}>
+        <div style={{ ...styles.shipName, borderBottom: '1px solid rgba(255, 170, 0, 0.3)' }}>
+          <div style={{ fontSize: '10px', opacity: 0.6, letterSpacing: '2px', color: '#ffaa00' }}>MISSIONS</div>
+        </div>
+        {data.missions.slice(0, 3).map((m, i) => (
+          <div key={i} style={{ ...styles.readout, opacity: m.completed ? 0.4 : 1 }}>
+            <div style={{ ...styles.label, color: m.completed ? '#44ff44' : '#ffaa00' }}>
+              {m.completed ? '✓' : '○'} {m.title}
+            </div>
+          </div>
+        ))}
       </div>
       
       {/* Top Right Controls */}
@@ -191,5 +212,15 @@ const styles: Record<string, React.CSSProperties> = {
     left: '50%',
     transform: 'translateX(-50%)',
     textAlign: 'center',
+  },
+  rightPanel: {
+    position: 'absolute',
+    top: '20px',
+    right: '80px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    pointerEvents: 'auto',
+    width: '120px',
   },
 }

@@ -4,7 +4,11 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { AudioEngine } from './AudioEngine'
 import { createStarShaderMaterial } from '../shaders/starShader'
 import { IonExhaust } from './IonExhaust'
-import { getStarAtSector, findNearestStar, STAR_TYPES } from './ProceduralStars'
+import { AsteroidField } from './AsteroidField'
+import { ParticleTrail } from './ParticleTrail'
+import { DiscoverySystem } from './DiscoverySystem'
+import { WarpEffect } from './WarpEffect'
+import { STAR_TYPES } from './ProceduralStars'
 import { showNotification } from '../components/Notifications'
 
 export interface HUDData {
@@ -18,6 +22,8 @@ export interface HUDData {
   headlights: boolean
   target: string | null
   perfMode: boolean
+  discoveries: number
+  missions: { title: string; completed: boolean }[]
 }
 
 export class SpaceEngine {
@@ -70,6 +76,13 @@ export class SpaceEngine {
   // Visual effects
   private ionExhaust: IonExhaust | null = null
   private proceduralStars: THREE.Group | null = null
+  
+  // Fun features
+  private asteroidField: AsteroidField | null = null
+  private particleTrail: ParticleTrail | null = null
+  private discoverySystem!: DiscoverySystem
+  private warpEffect: WarpEffect | null = null
+  private scanCooldown: number = 0
   
   // Performance
   private starfieldPoints: THREE.Points | null = null
@@ -147,6 +160,10 @@ export class SpaceEngine {
     await this.loadShip()
 
     this.ionExhaust = new IonExhaust(this.scene)
+    this.warpEffect = new WarpEffect(this.scene)
+    this.discoverySystem = new DiscoverySystem()
+    this.particleTrail = new ParticleTrail(this.scene)
+    this.asteroidField = new AsteroidField(this.scene, new THREE.Vector3(150, 0, 0))
     this.setupControls()
     window.addEventListener('resize', this.onResize)
 
@@ -430,6 +447,10 @@ export class SpaceEngine {
         this.camera.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), -0.05)
       }
       
+      if (e.key === 'x' || e.key === 'X') {
+        this.scanTarget()
+      }
+      
       if (e.key === 'r' || e.key === 'R') {
         this.camera.position.set(0, 5, 15)
         showNotification('Camera reset', 'info')
@@ -619,6 +640,27 @@ export class SpaceEngine {
       this.ionExhaust.setPosition(this.ship.position, this.shipQuaternion)
     }
     
+    // Update particle trail
+    if (this.shipVelocity.length() > 1 && this.particleTrail) {
+      this.particleTrail.addPoint(this.ship.position, this.shipVelocity.length())
+    }
+    if (this.particleTrail) {
+      this.particleTrail.update(deltaTime)
+    }
+    
+    // Update asteroid field
+    if (this.asteroidField) {
+      this.asteroidField.update(deltaTime)
+    }
+    
+    // Update warp effect
+    if (this.warpEffect) {
+      this.warpEffect.update(deltaTime, this.ship.position, this.shipQuaternion)
+      if (this.shipVelocity.length() > 25 && !this.warpEffect['isActive']) {
+        this.warpEffect.activate(this.shipVelocity.length())
+      }
+    }
+    
     // Rotate habitat wheel
     this.ship.children.forEach(child => {
       if (child.userData.rotating) {
@@ -631,6 +673,9 @@ export class SpaceEngine {
       this.starfieldPoints.position.copy(this.ship.position)
       this.starfieldPoints.rotation.y += 0.0001
     }
+    
+    // Scan cooldown
+    if (this.scanCooldown > 0) this.scanCooldown -= deltaTime
   }
 
   private updateHUD() {
@@ -644,6 +689,11 @@ export class SpaceEngine {
         nearestName = name
       }
     }
+    
+    const missions = this.discoverySystem.getMissions().map(m => ({
+      title: m.title,
+      completed: m.completed,
+    }))
     
     this.onHUDUpdate({
       speed: this.shipVelocity.length(),
@@ -660,6 +710,8 @@ export class SpaceEngine {
       headlights: this.headlightsEnabled,
       target: this.targetBody,
       perfMode: this.perfMode,
+      discoveries: this.discoverySystem.getScanCount(),
+      missions,
     })
   }
 
@@ -782,6 +834,41 @@ export class SpaceEngine {
     return this.targetBody
   }
 
+  private scanTarget() {
+    if (this.scanCooldown > 0) {
+      showNotification(`Scan cooling down... ${this.scanCooldown.toFixed(1)}s`, 'warning')
+      return
+    }
+    
+    if (!this.targetBody) {
+      showNotification('No target selected. Press T to lock target.', 'warning')
+      return
+    }
+    
+    const target = this.celestialBodies.get(this.targetBody)
+    if (!target) {
+      showNotification('Target not found', 'warning')
+      return
+    }
+    
+    const dist = target.position.distanceTo(this.ship.position) / 107.7
+    
+    if (dist > 2.0) {
+      showNotification(`Target too far. Distance: ${dist.toFixed(2)} AU. Get closer.`, 'warning')
+      return
+    }
+    
+    const data = target.userData
+    const scanned = this.discoverySystem.scanBody(data.name, data.type, dist)
+    
+    if (scanned) {
+      showNotification(`Scan complete: ${data.name}`, 'success')
+      this.scanCooldown = 3
+    } else {
+      showNotification(`${data.name} already scanned`, 'info')
+    }
+  }
+
   executeCommand(cmd: string): string {
     const parts = cmd.trim().split(/\s+/)
     const command = parts[0].toLowerCase()
@@ -844,6 +931,26 @@ export class SpaceEngine {
         }
         return 'Usage: warp [multiplier]'
         
+      case 'scan':
+        if (parts[1]) {
+          const targetName = parts[1]
+          const target = this.celestialBodies.get(targetName)
+          if (!target) return `Body not found: ${targetName}`
+          const dist = target.position.distanceTo(this.ship.position) / 107.7
+          const data = target.userData
+          const scanned = this.discoverySystem.scanBody(data.name, data.type, dist)
+          return scanned ? `Scanned ${data.name}` : `${data.name} already scanned`
+        }
+        return 'Usage: scan [body_name]'
+        
+      case 'missions':
+        const missions = this.discoverySystem.getMissions()
+        return missions.map(m => `${m.completed ? '✓' : '○'} ${m.title}: ${m.description}`).join('\n')
+        
+      case 'discoveries':
+        const discoveries = this.discoverySystem.getDiscoveries()
+        return discoveries.map(d => `- ${d.name} (${d.type}) at ${d.distance.toFixed(2)} AU`).join('\n') || 'No discoveries yet'
+        
       case 'clear':
         return '__CLEAR__'
         
@@ -853,7 +960,7 @@ export class SpaceEngine {
         return 'Terminal closed'
         
       default:
-        return `Unknown command: ${command}`
+        return `Unknown command: ${command}. Try: spawn, speed, warp, scan, missions, discoveries, clear, close`
     }
   }
 
@@ -870,6 +977,9 @@ export class SpaceEngine {
     window.removeEventListener('resize', this.onResize)
     this.audio.destroy()
     this.ionExhaust?.destroy()
+    this.warpEffect?.destroy()
+    this.particleTrail?.destroy()
+    this.asteroidField?.destroy()
     this.renderer.dispose()
     this.container.removeChild(this.renderer.domElement)
   }
