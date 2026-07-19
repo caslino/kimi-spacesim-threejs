@@ -109,6 +109,7 @@ export class SpaceEngine {
     this.solarSystem = new THREE.Group()
     this.scene.add(this.solarSystem)
     await this.loadSolarSystem()
+    this.createSaturnRings()
 
     this.ship = new THREE.Group()
     this.scene.add(this.ship)
@@ -220,6 +221,22 @@ export class SpaceEngine {
       this.solarSystem.add(mesh)
       this.celestialBodies.set(name, mesh)
     }
+  }
+
+  private createSaturnRings() {
+    const saturn = this.celestialBodies.get('Saturn')
+    if (!saturn) return
+
+    const ringGeometry = new THREE.RingGeometry(4.5, 7.5, 64)
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: 0xc4a882,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.6,
+    })
+    const rings = new THREE.Mesh(ringGeometry, ringMaterial)
+    rings.rotation.x = Math.PI / 2
+    saturn.add(rings)
   }
 
   private getVisualRadius(radiusKm: number, type: string): number {

@@ -3,12 +3,14 @@ import { SpaceEngine } from './engine/SpaceEngine'
 import { HUD } from './components/HUD'
 import { BootSequence } from './components/BootSequence'
 import { CommandTerminal } from './components/CommandTerminal'
+import { FlightManual } from './components/FlightManual'
 
 function App() {
   const containerRef = useRef<HTMLDivElement>(null)
   const engineRef = useRef<SpaceEngine | null>(null)
   const [bootComplete, setBootComplete] = useState(false)
   const [terminalOpen, setTerminalOpen] = useState(false)
+  const [manualOpen, setManualOpen] = useState(false)
   const [hudData, setHudData] = useState({
     speed: 0,
     thrust: 0,
@@ -35,7 +37,20 @@ function App() {
     
     engine.init()
 
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.key === '?' || e.key === 'F1') && !terminalOpen) {
+        e.preventDefault()
+        setManualOpen(prev => !prev)
+      }
+      if (e.key === 'Escape') {
+        setManualOpen(false)
+      }
+    }
+    
+    window.addEventListener('keydown', handleKeyDown)
+
     return () => {
+      window.removeEventListener('keydown', handleKeyDown)
       engine.destroy()
       engineRef.current = null
     }
@@ -67,6 +82,7 @@ function App() {
             onExecute={handleCommand}
             onClose={() => setTerminalOpen(false)}
           />
+          <FlightManual isOpen={manualOpen} onClose={() => setManualOpen(false)} />
         </>
       )}
     </div>
