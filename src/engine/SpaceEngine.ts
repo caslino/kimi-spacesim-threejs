@@ -3,6 +3,9 @@ import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { AudioEngine } from './AudioEngine'
 import { createStarShaderMaterial } from '../shaders/starShader'
+import { IonExhaust } from './IonExhaust'
+import { getStarAtSector, findNearestStar, STAR_TYPES } from './ProceduralStars'
+import { showNotification } from '../components/Notifications'
 
 export interface HUDData {
   speed: number
@@ -14,6 +17,7 @@ export interface HUDData {
   flashlight: boolean
   headlights: boolean
   target: string | null
+  perfMode: boolean
 }
 
 export class SpaceEngine {
@@ -53,13 +57,31 @@ export class SpaceEngine {
   private targetLockTime: number = 0
   private starMaterial: THREE.ShaderMaterial | null = null
   private mobileSteering: { yaw: number; pitch: number }
-  private readonly BASE_SPEED = 50.0 // km/s
-  private readonly ACCEL_TIME = 30.0 // seconds
-  private readonly MAX_ANGULAR_SPEED = 8 * (Math.PI / 180) // rad/s
-  private readonly ANGULAR_ACCEL = 18 * (Math.PI / 180) // rad/s²
+  private isMobile: boolean
+  private perfMode: boolean = false
+  
+  // Lighting system
+  private ambientLight!: THREE.AmbientLight
+  private sunLight!: THREE.DirectionalLight
+  private sunPoint!: THREE.PointLight
+  private flashlight!: THREE.SpotLight
+  private deepSpaceFactor: number = 0
+  
+  // Visual effects
+  private ionExhaust: IonExhaust | null = null
+  private proceduralStars: THREE.Group | null = null
+  
+  // Performance
+  private starfieldPoints: THREE.Points | null = null
+  
+  private readonly BASE_SPEED = 50.0
+  private readonly ACCEL_TIME = 30.0
+  private readonly MAX_ANGULAR_SPEED = 8 * (Math.PI / 180)
+  private readonly ANGULAR_ACCEL = 18 * (Math.PI / 180)
   private readonly ANGULAR_DAMPING = 0.85
   private readonly THRUST_STEP = 5
   private readonly VISUAL_SCALE = 0.00000072
+  private readonly SOLAR_CULL_DISTANCE = 3.0 * 107.7 // 3 AU in visual units
   
   constructor(container: HTMLDivElement, onHUDUpdate: (data: HUDData) => void) {
     this.container = container
@@ -86,20 +108,21 @@ export class SpaceEngine {
     this.targetLockTime = 0
     this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
     this.mobileSteering = { yaw: 0, pitch: 0 }
+    this.perfMode = localStorage.getItem('caslino_spacesim_perf') === 'low'
   }
 
   async init() {
     this.renderer = new THREE.WebGLRenderer({ 
-      antialias: true,
+      antialias: !this.perfMode,
       preserveDrawingBuffer: true 
     })
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight)
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.perfMode ? 1 : 2))
     this.renderer.setClearColor(0x000510)
     this.container.appendChild(this.renderer.domElement)
 
     this.scene = new THREE.Scene()
-    this.scene.fog = new THREE.FogExp2(0x000510, 0.00015)
+    this.scene.fog = new THREE.FogExp2(0x000510, this.perfMode ? 0.0001 : 0.00015)
 
     this.camera = new THREE.PerspectiveCamera(
       60,
@@ -123,6 +146,7 @@ export class SpaceEngine {
     this.scene.add(this.ship)
     await this.loadShip()
 
+    this.ionExhaust = new IonExhaust(this.scene)
     this.setupControls()
     window.addEventListener('resize', this.onResize)
 
@@ -130,20 +154,28 @@ export class SpaceEngine {
   }
 
   private setupLighting() {
-    const ambient = new THREE.AmbientLight(0x1a2030, 0.2)
-    this.scene.add(ambient)
+    // Near-star lighting
+    this.ambientLight = new THREE.AmbientLight(0x1a2030, 0.2)
+    this.scene.add(this.ambientLight)
 
-    const sunLight = new THREE.DirectionalLight(0xebf3ff, 3.0)
-    sunLight.position.set(100, 0, 0)
-    this.scene.add(sunLight)
+    this.sunLight = new THREE.DirectionalLight(0xebf3ff, 3.0)
+    this.sunLight.position.set(100, 0, 0)
+    this.scene.add(this.sunLight)
 
-    const sunPoint = new THREE.PointLight(0xfffaed, 3.0, 0, 0)
-    sunPoint.position.set(0, 0, 0)
-    this.scene.add(sunPoint)
+    this.sunPoint = new THREE.PointLight(0xfffaed, 3.0, 0, 0)
+    this.sunPoint.position.set(0, 0, 0)
+    this.scene.add(this.sunPoint)
+
+    // Flashlight
+    this.flashlight = new THREE.SpotLight(0xffffff, 0, 50, Math.PI / 8, 0.45, 1)
+    this.flashlight.position.set(0, 0, 0)
+    this.flashlight.target.position.set(0, 0, -1)
+    this.camera.add(this.flashlight)
+    this.camera.add(this.flashlight.target)
   }
 
   private createStarfield() {
-    const count = 15000
+    const count = this.perfMode ? 3000 : 15000
     const geometry = new THREE.BufferGeometry()
     const positions = new Float32Array(count * 3)
     const colors = new Float32Array(count * 3)
@@ -182,8 +214,8 @@ export class SpaceEngine {
     geometry.setAttribute('aTwinkleSpeed', new THREE.BufferAttribute(twinkleSpeeds, 1))
 
     this.starMaterial = createStarShaderMaterial()
-    const stars = new THREE.Points(geometry, this.starMaterial)
-    this.scene.add(stars)
+    this.starfieldPoints = new THREE.Points(geometry, this.starMaterial)
+    this.scene.add(this.starfieldPoints)
   }
 
   private async loadSolarSystem() {
@@ -196,7 +228,7 @@ export class SpaceEngine {
       if (!name) continue
 
       const visualRadius = this.getVisualRadius(parseFloat(radius), type)
-      const geometry = new THREE.SphereGeometry(visualRadius, 32, 32)
+      const geometry = new THREE.SphereGeometry(visualRadius, this.perfMode ? 16 : 32, this.perfMode ? 16 : 32)
       
       let color = 0x888888
       if (type === 'Star') color = 0xffaa00
@@ -207,12 +239,12 @@ export class SpaceEngine {
       else if (name === 'Venus') color = 0xffcc88
 
       const material = new THREE.MeshStandardMaterial({ 
-      color,
-      emissive: type === 'Star' ? color : 0x000000,
-      emissiveIntensity: type === 'Star' ? 1.0 : 0.0,
-      roughness: 0.8,
-      metalness: 0.2,
-    })
+        color,
+        emissive: type === 'Star' ? color : 0x000000,
+        emissiveIntensity: type === 'Star' ? 1.0 : 0.0,
+        roughness: 0.8,
+        metalness: 0.2,
+      })
 
       const mesh = new THREE.Mesh(geometry, material)
       
@@ -275,10 +307,10 @@ export class SpaceEngine {
   private async loadShip() {
     const loader = new OBJLoader()
     const components = [
-      { file: 'CmdModule.obj', texture: 'panels_grey.JPG' },
-      { file: 'HabWheel.obj', texture: 'AFRAM_BrushedMetal.jpg' },
+      { file: 'CmdModule.obj', texture: 'panels_grey.JPG', lights: 2 },
+      { file: 'HabWheel.obj', texture: 'AFRAM_BrushedMetal.jpg', rotating: true },
       { file: 'IonDrive.obj', texture: 'MLI_new5.jpg' },
-      { file: 'FuelModule.obj', texture: 'FuelTankGrid.jpg' },
+      { file: 'FuelModule.obj', texture: 'FuelTankGrid.jpg', lights: 2 },
       { file: 'SolarPanels_Left.obj', texture: 'SolarPanel.jpg' },
       { file: 'SolarPanels_Middle.obj', texture: 'SolarPanel.jpg' },
       { file: 'SolarPanels_Right.obj', texture: 'SolarPanel.jpg' },
@@ -310,6 +342,21 @@ export class SpaceEngine {
           }
         })
 
+        // Add headlights for components that have them
+        if (comp.lights && this.headlightsEnabled) {
+          for (let i = 0; i < comp.lights; i++) {
+            const spot = new THREE.SpotLight(0xffffff, 0, 20, Math.PI / 6, 0.3, 1)
+            spot.position.set((i - comp.lights/2) * 0.5, 0, -0.5)
+            obj.add(spot)
+          }
+        }
+
+        // Rotating habitat wheel
+        if (comp.rotating) {
+          obj.userData.rotating = true
+          obj.userData.rotationSpeed = 0.31416
+        }
+
         this.ship.add(obj)
       } catch (e) {
         console.warn(`Failed to load ${comp.file}:`, e)
@@ -332,14 +379,18 @@ export class SpaceEngine {
       
       if (e.key === 'f' || e.key === 'F') {
         this.flashlightEnabled = !this.flashlightEnabled
+        this.flashlight.intensity = this.flashlightEnabled ? 2.2 : 0
+        showNotification(`Flashlight ${this.flashlightEnabled ? 'ON' : 'OFF'}`, 'info')
       }
       
       if (e.key === 'h' || e.key === 'H') {
         this.headlightsEnabled = !this.headlightsEnabled
+        showNotification(`Headlights ${this.headlightsEnabled ? 'ON' : 'OFF'}`, 'info')
       }
       
       if (e.key === 'm' || e.key === 'M') {
         const muted = this.audio.toggleMute()
+        showNotification(muted ? 'Audio MUTED' : 'Audio ON', 'info')
       }
       
       if (e.key === '+' || e.key === '=') {
@@ -353,6 +404,7 @@ export class SpaceEngine {
       
       if (e.key === 'b' || e.key === 'B') {
         this.brakesActive = !this.brakesActive
+        showNotification(`Airbrakes ${this.brakesActive ? 'DEPLOYED' : 'RETRACTED'}`, this.brakesActive ? 'warning' : 'info')
       }
       
       if (e.key === 't' || e.key === 'T') {
@@ -361,6 +413,15 @@ export class SpaceEngine {
       
       if (e.key === 'r' || e.key === 'R') {
         this.camera.position.set(0, 5, 15)
+        showNotification('Camera reset', 'info')
+      }
+      
+      if (e.key === 'l' || e.key === 'L') {
+        this.toggleRecording()
+      }
+      
+      if (e.key === 'p' || e.key === 'P') {
+        this.togglePerfMode()
       }
       
       if (e.key === 'Escape') {
@@ -430,6 +491,8 @@ export class SpaceEngine {
     this.updatePhysics(deltaTime)
     this.updateOrbits(deltaTime)
     this.updateCamera()
+    this.updateLighting(deltaTime)
+    this.updateEffects(deltaTime)
     this.updateHUD()
     
     this.renderer.render(this.scene, this.camera)
@@ -511,6 +574,46 @@ export class SpaceEngine {
     this.camera.lookAt(this.ship.position)
   }
 
+  private updateLighting(deltaTime: number) {
+    const distFromOrigin = this.ship.position.length()
+    const targetDeepSpace = distFromOrigin > this.SOLAR_CULL_DISTANCE ? 1.0 : 0.0
+    this.deepSpaceFactor += (targetDeepSpace - this.deepSpaceFactor) * 0.05
+    
+    // Solar system culling
+    this.solarSystem.visible = this.deepSpaceFactor < 0.9
+    
+    // Transition lighting
+    const ambientColor = new THREE.Color(0x1a2030).lerp(new THREE.Color(0x3d0f6e), this.deepSpaceFactor)
+    this.ambientLight.color.copy(ambientColor)
+    this.ambientLight.intensity = 0.2 + this.deepSpaceFactor * 0.6
+    
+    // Sun light intensity fades with distance
+    const sunIntensity = 3.0 * (1 - this.deepSpaceFactor)
+    this.sunLight.intensity = sunIntensity
+    this.sunPoint.intensity = sunIntensity
+  }
+
+  private updateEffects(deltaTime: number) {
+    // Update ion exhaust
+    if (this.ionExhaust) {
+      this.ionExhaust.update(this.thrustPercent, deltaTime, this.clock.getElapsedTime())
+      this.ionExhaust.setPosition(this.ship.position, this.shipQuaternion)
+    }
+    
+    // Rotate habitat wheel
+    this.ship.children.forEach(child => {
+      if (child.userData.rotating) {
+        child.rotation.x += child.userData.rotationSpeed * deltaTime
+      }
+    })
+    
+    // Update starfield position (infinite parallax)
+    if (this.starfieldPoints) {
+      this.starfieldPoints.position.copy(this.ship.position)
+      this.starfieldPoints.rotation.y += 0.0001
+    }
+  }
+
   private updateHUD() {
     let nearestName = ''
     let nearestDist = Infinity
@@ -537,6 +640,7 @@ export class SpaceEngine {
       flashlight: this.flashlightEnabled,
       headlights: this.headlightsEnabled,
       target: this.targetBody,
+      perfMode: this.perfMode,
     })
   }
 
@@ -550,6 +654,7 @@ export class SpaceEngine {
       brakesActive: this.brakesActive,
       simTime: this.simTime,
       savedAt: Date.now(),
+      perfMode: this.perfMode,
     }
     localStorage.setItem('caslino_spacesim_save', JSON.stringify(state))
   }
@@ -567,8 +672,51 @@ export class SpaceEngine {
       if (state.brakesActive !== undefined) this.brakesActive = state.brakesActive
       if (state.simTime) this.simTime = state.simTime
       if (state.distance) this.distanceTraveled = state.distance
+      if (state.perfMode !== undefined) this.perfMode = state.perfMode
+      
+      // Offline progression
+      if (state.savedAt) {
+        const elapsed = (Date.now() - state.savedAt) / 1000
+        const maxOffline = 300 // Cap at 5 minutes
+        const integrationTime = Math.min(elapsed, maxOffline)
+        
+        if (integrationTime > 0 && this.shipVelocity.length() > 0.01) {
+          // Simple Euler integration for offline time
+          const steps = Math.min(integrationTime, 300)
+          const dt = integrationTime / steps
+          const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.shipQuaternion)
+          
+          for (let i = 0; i < steps; i++) {
+            this.ship.position.add(forward.clone().multiplyScalar(this.shipVelocity.length() * dt * 1000 * this.VISUAL_SCALE))
+            this.distanceTraveled += this.shipVelocity.length() * dt
+          }
+          
+          showNotification(`Offline: Advanced ${integrationTime.toFixed(0)}s`, 'info')
+        }
+      }
     } catch (e) {
       console.warn('Failed to load saved state:', e)
+    }
+  }
+
+  private toggleRecording() {
+    showNotification('Recording not yet implemented', 'warning')
+  }
+
+  private togglePerfMode() {
+    this.perfMode = !this.perfMode
+    localStorage.setItem('caslino_spacesim_perf', this.perfMode ? 'low' : 'high')
+    showNotification(`Performance mode: ${this.perfMode ? 'LOW' : 'HIGH'}`, 'info')
+    
+    // Update renderer settings
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.perfMode ? 1 : 2))
+    
+    // Update starfield
+    if (this.starfieldPoints) {
+      const geometry = this.starfieldPoints.geometry
+      const positions = geometry.attributes.position
+      const count = this.perfMode ? 3000 : 15000
+      geometry.setDrawRange(0, count)
     }
   }
 
@@ -598,6 +746,7 @@ export class SpaceEngine {
     this.targetLockTime = name ? Date.now() : 0
     if (name) {
       this.audio.playSonarPing()
+      showNotification(`Target: ${name}`, 'success')
     }
   }
 
@@ -621,13 +770,40 @@ export class SpaceEngine {
     switch (command) {
       case 'spawn':
         if (parts[1] === 'star') {
-          return 'Star spawning not yet implemented'
+          const typeName = parts[2]
+          const starType = STAR_TYPES.find(t => t.name.toLowerCase() === typeName?.toLowerCase())
+          
+          if (starType) {
+            // Spawn procedural star ahead of ship
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.shipQuaternion)
+            const spawnPos = this.ship.position.clone().add(forward.multiplyScalar(500))
+            
+            const size = starType.sizeRange[0] + Math.random() * (starType.sizeRange[1] - starType.sizeRange[0])
+            const geometry = new THREE.SphereGeometry(size, 32, 32)
+            const material = new THREE.MeshStandardMaterial({
+              color: starType.color,
+              emissive: starType.color,
+              emissiveIntensity: 2.0,
+            })
+            const mesh = new THREE.Mesh(geometry, material)
+            mesh.position.copy(spawnPos)
+            mesh.userData = { name: starType.name, type: 'ProceduralStar' }
+            
+            this.scene.add(mesh)
+            this.celestialBodies.set(starType.name, mesh)
+            
+            showNotification(`Spawned ${starType.name}`, 'success')
+            return `Spawned ${starType.name} at ${spawnPos.x.toFixed(0)}, ${spawnPos.y.toFixed(0)}, ${spawnPos.z.toFixed(0)}`
+          }
+          
+          return 'Usage: spawn star [type] - Available types: M_RedDwarf, K_OrangeDwarf, G_YellowDwarf, F_YellowWhite, A_White, B_BlueWhite, O_BlueGiant, NeutronStar, BlackHole'
         }
         if (parts.length === 4) {
           const x = parseFloat(parts[1])
           const y = parseFloat(parts[2])
           const z = parseFloat(parts[3])
           this.ship.position.set(x, y, z)
+          showNotification(`Teleported to ${x}, ${y}, ${z}`, 'success')
           return `Teleported to ${x}, ${y}, ${z}`
         }
         return 'Usage: spawn [x] [y] [z] | spawn star [type]'
@@ -636,6 +812,7 @@ export class SpaceEngine {
         if (parts[1]) {
           const speed = parseFloat(parts[1])
           this.shipVelocity.setLength(speed * this.VISUAL_SCALE)
+          showNotification(`Speed: ${speed} km/s`, 'info')
           return `Speed set to ${speed} km/s`
         }
         return 'Usage: speed [km/s]'
@@ -643,6 +820,7 @@ export class SpaceEngine {
       case 'warp':
         if (parts[1]) {
           this.timeWarp = parseFloat(parts[1])
+          showNotification(`Time warp: ${this.timeWarp}x`, 'info')
           return `Time warp set to ${this.timeWarp}x`
         }
         return 'Usage: warp [multiplier]'
@@ -664,10 +842,15 @@ export class SpaceEngine {
     return this.terminalOpen
   }
 
+  isMobileDevice(): boolean {
+    return this.isMobile
+  }
+
   destroy() {
     this.isRunning = false
     window.removeEventListener('resize', this.onResize)
     this.audio.destroy()
+    this.ionExhaust?.destroy()
     this.renderer.dispose()
     this.container.removeChild(this.renderer.domElement)
   }

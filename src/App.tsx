@@ -1,3 +1,4 @@
+import { NotificationContainer, showNotification } from './components/Notifications'
 import { useEffect, useRef, useState } from 'react'
 import { SpaceEngine } from './engine/SpaceEngine'
 import { HUD } from './components/HUD'
@@ -27,6 +28,7 @@ function App() {
     flashlight: false,
     headlights: false,
     target: null as string | null,
+    perfMode: false,
   })
 
   useEffect(() => {
@@ -132,7 +134,13 @@ function App() {
             onToggleAudio={() => engineRef.current?.getAudio().toggleMute()}
             onToggleManual={() => setManualOpen(prev => !prev)}
             onToggleTerminal={() => setTerminalOpen(prev => !prev)}
+            onTogglePerf={() => {
+              // Performance mode toggle is handled in SpaceEngine via P key
+              // But we can also trigger it here if needed
+              showNotification('Press P to toggle performance mode', 'info')
+            }}
           />
+          <NotificationContainer />
           <CommandTerminal
             isOpen={terminalOpen}
             onExecute={handleCommand}

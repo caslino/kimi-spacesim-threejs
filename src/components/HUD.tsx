@@ -5,9 +5,10 @@ interface HUDProps {
   onToggleAudio?: () => void
   onToggleManual?: () => void
   onToggleTerminal?: () => void
+  onTogglePerf?: () => void
 }
 
-export function HUD({ data, onToggleAudio, onToggleManual, onToggleTerminal }: HUDProps) {
+export function HUD({ data, onToggleAudio, onToggleManual, onToggleTerminal, onTogglePerf }: HUDProps) {
   return (
     <div style={styles.container}>
       {/* Left Panel */}
@@ -61,7 +62,8 @@ export function HUD({ data, onToggleAudio, onToggleManual, onToggleTerminal }: H
       <div style={styles.topRight}>
         <button style={styles.iconButton} onClick={onToggleAudio} title="Toggle Audio">🔇</button>
         <button style={styles.iconButton} onClick={onToggleManual} title="Flight Manual">?</button>
-        <button style={styles.iconButton} onClick={onToggleTerminal} title="Command Terminal">⚡</button>
+        <button style={{...styles.iconButton, color: data.perfMode ? '#ffaa00' : '#00ffc8'}} onClick={onTogglePerf} title="Performance Mode">⚡</button>
+        <button style={styles.iconButton} onClick={onToggleTerminal} title="Command Terminal">⌨️</button>
       </div>
       
       {/* Scanner Visualization - Bottom Right */}
