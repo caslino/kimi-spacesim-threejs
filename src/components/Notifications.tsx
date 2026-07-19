@@ -28,7 +28,7 @@ export function useNotifications(): Notification[] {
   
   useEffect(() => {
     listeners.add(setNotifications)
-    return () => listeners.delete(setNotifications)
+    return () => { listeners.delete(setNotifications) }
   }, [])
   
   return notifications
