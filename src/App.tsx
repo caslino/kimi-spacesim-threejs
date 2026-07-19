@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { SpaceEngine } from './engine/SpaceEngine'
 import { HUD } from './components/HUD'
 import { BootSequence } from './components/BootSequence'
+import { CommandTerminal } from './components/CommandTerminal'
 
 function App() {
   const containerRef = useRef<HTMLDivElement>(null)
   const engineRef = useRef<SpaceEngine | null>(null)
   const [bootComplete, setBootComplete] = useState(false)
+  const [terminalOpen, setTerminalOpen] = useState(false)
   const [hudData, setHudData] = useState({
     speed: 0,
     thrust: 0,
@@ -25,6 +27,12 @@ function App() {
       setHudData(data)
     })
     engineRef.current = engine
+    
+    engine.setCommandCallback((cmd) => {
+      if (cmd === '__OPEN__') setTerminalOpen(true)
+      if (cmd === '__CLOSE__') setTerminalOpen(false)
+    })
+    
     engine.init()
 
     return () => {
@@ -38,6 +46,11 @@ function App() {
     engineRef.current?.start()
   }
 
+  const handleCommand = (cmd: string): string => {
+    if (!engineRef.current) return 'Engine not initialized'
+    return engineRef.current.executeCommand(cmd)
+  }
+
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
@@ -47,7 +60,14 @@ function App() {
       )}
       
       {bootComplete && (
-        <HUD data={hudData} />
+        <>
+          <HUD data={hudData} />
+          <CommandTerminal
+            isOpen={terminalOpen}
+            onExecute={handleCommand}
+            onClose={() => setTerminalOpen(false)}
+          />
+        </>
       )}
     </div>
   )

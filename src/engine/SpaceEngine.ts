@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { AudioEngine } from './AudioEngine'
 
 export interface HUDData {
   speed: number
@@ -40,6 +41,13 @@ export class SpaceEngine {
   private isRunning: boolean
   private lastSave: number
   
+  private audio: AudioEngine
+  private commandCallback: ((cmd: string) => void) | null = null
+  private terminalOpen: boolean
+  private flashlightEnabled: boolean
+  private headlightsEnabled: boolean
+  private rcsActive: boolean
+  
   // Physics constants
   private readonly BASE_SPEED = 50.0 // km/s
   private readonly ACCEL_TIME = 30.0 // seconds
@@ -65,10 +73,14 @@ export class SpaceEngine {
     this.keys = new Set()
     this.isRunning = false
     this.lastSave = 0
+    this.audio = new AudioEngine()
+    this.terminalOpen = false
+    this.flashlightEnabled = false
+    this.headlightsEnabled = false
+    this.rcsActive = false
   }
 
   async init() {
-    // Renderer
     this.renderer = new THREE.WebGLRenderer({ 
       antialias: true,
       preserveDrawingBuffer: true 
@@ -78,11 +90,9 @@ export class SpaceEngine {
     this.renderer.setClearColor(0x000510)
     this.container.appendChild(this.renderer.domElement)
 
-    // Scene
     this.scene = new THREE.Scene()
     this.scene.fog = new THREE.FogExp2(0x000510, 0.00015)
 
-    // Camera
     this.camera = new THREE.PerspectiveCamera(
       60,
       this.container.clientWidth / this.container.clientHeight,
@@ -91,30 +101,22 @@ export class SpaceEngine {
     )
     this.camera.position.set(0, 5, 15)
 
-    // Clock
     this.clock = new THREE.Clock()
 
-    // Lighting
     this.setupLighting()
-
-    // Starfield
     this.createStarfield()
 
-    // Solar System
     this.solarSystem = new THREE.Group()
     this.scene.add(this.solarSystem)
     await this.loadSolarSystem()
 
-    // Ship
     this.ship = new THREE.Group()
     this.scene.add(this.ship)
     await this.loadShip()
 
-    // Event listeners
     this.setupControls()
     window.addEventListener('resize', this.onResize)
 
-    // Load saved state
     this.loadState()
   }
 
@@ -175,7 +177,6 @@ export class SpaceEngine {
   }
 
   private async loadSolarSystem() {
-    // Load starmap data
     const response = await fetch('/starmap.csv')
     const csv = await response.text()
     const lines = csv.trim().split('\n').slice(1)
@@ -204,7 +205,7 @@ export class SpaceEngine {
       const mesh = new THREE.Mesh(geometry, material)
       
       if (sma && type !== 'Star') {
-        const distance = parseFloat(sma) * 107.7 // 1 AU ≈ 107.7 visual units
+        const distance = parseFloat(sma) * 107.7
         mesh.position.set(distance, 0, 0)
       }
 
@@ -254,7 +255,6 @@ export class SpaceEngine {
       try {
         const obj = await loader.loadAsync(basePath + comp.file)
         
-        // Apply texture if available
         const textureLoader = new THREE.TextureLoader()
         const texture = textureLoader.load(basePath + comp.texture)
         
@@ -279,19 +279,49 @@ export class SpaceEngine {
 
   private setupControls() {
     window.addEventListener('keydown', (e) => {
+      if (this.terminalOpen && e.key !== 'Escape') return
+      
       this.keys.add(e.key)
       
-      // Thrust controls
+      if (e.key === 'c' || e.key === 'C') {
+        this.terminalOpen = !this.terminalOpen
+        if (this.commandCallback) this.commandCallback(this.terminalOpen ? '__OPEN__' : '__CLOSE__')
+      }
+      
+      if (e.key === 'f' || e.key === 'F') {
+        this.flashlightEnabled = !this.flashlightEnabled
+      }
+      
+      if (e.key === 'h' || e.key === 'H') {
+        this.headlightsEnabled = !this.headlightsEnabled
+      }
+      
+      if (e.key === 'm' || e.key === 'M') {
+        const muted = this.audio.toggleMute()
+      }
+      
       if (e.key === '+' || e.key === '=') {
         this.thrustPercent = Math.min(100, this.thrustPercent + this.THRUST_STEP)
+        this.audio.setThrust(this.thrustPercent)
       }
       if (e.key === '-') {
         this.thrustPercent = Math.max(0, this.thrustPercent - this.THRUST_STEP)
+        this.audio.setThrust(this.thrustPercent)
       }
       
-      // Brake toggle
       if (e.key === 'b' || e.key === 'B') {
         this.brakesActive = !this.brakesActive
+      }
+      
+      if (e.key === 'r' || e.key === 'R') {
+        this.camera.position.set(0, 5, 15)
+      }
+      
+      if (e.key === 'Escape') {
+        if (this.terminalOpen) {
+          this.terminalOpen = false
+          if (this.commandCallback) this.commandCallback('__CLOSE__')
+        }
       }
     })
 
@@ -299,7 +329,6 @@ export class SpaceEngine {
       this.keys.delete(e.key)
     })
 
-    // Mouse controls for camera
     let isDragging = false
     let lastMouse = { x: 0, y: 0 }
     
@@ -359,7 +388,6 @@ export class SpaceEngine {
     
     this.renderer.render(this.scene, this.camera)
     
-    // Auto-save every 60 seconds
     if (Date.now() - this.lastSave > 60000) {
       this.saveState()
       this.lastSave = Date.now()
@@ -367,7 +395,6 @@ export class SpaceEngine {
   }
 
   private updatePhysics(deltaTime: number) {
-    // Thrust/drag physics
     const thrustFraction = this.thrustPercent / 100
     const thrustAccel = thrustFraction * (this.BASE_SPEED / this.ACCEL_TIME)
     
@@ -377,38 +404,37 @@ export class SpaceEngine {
     
     const netAccel = thrustAccel - dragAccel
     
-    // Apply acceleration along ship's forward vector
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.shipQuaternion)
     this.shipVelocity.add(forward.multiplyScalar(netAccel * deltaTime))
     
-    // Apply position update
     const displacement = this.shipVelocity.clone().multiplyScalar(deltaTime * 1000 * this.VISUAL_SCALE)
     this.ship.position.add(displacement)
     this.distanceTraveled += this.shipVelocity.length() * deltaTime
     
-    // RCS Steering
     const yaw = (this.keys.has('ArrowLeft') ? 1 : 0) - (this.keys.has('ArrowRight') ? 1 : 0)
     const pitch = (this.keys.has('ArrowDown') ? 1 : 0) - (this.keys.has('ArrowUp') ? 1 : 0)
+    
+    if ((yaw !== 0 || pitch !== 0) && !this.rcsActive) {
+      this.rcsActive = true
+      this.audio.playRCSThruster()
+    } else if (yaw === 0 && pitch === 0) {
+      this.rcsActive = false
+    }
     
     if (yaw !== 0 || pitch !== 0) {
       this.angularVelocity.y += yaw * this.ANGULAR_ACCEL * deltaTime
       this.angularVelocity.x += pitch * this.ANGULAR_ACCEL * deltaTime
-      
-      // Clamp angular velocity
       this.angularVelocity.clampScalar(-this.MAX_ANGULAR_SPEED, this.MAX_ANGULAR_SPEED)
     } else {
-      // Damping
       this.angularVelocity.multiplyScalar(this.ANGULAR_DAMPING)
     }
     
-    // Apply rotation
     const yawQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.angularVelocity.y * deltaTime)
     const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.angularVelocity.x * deltaTime)
     
     this.shipQuaternion.multiply(yawQuat).multiply(pitchQuat)
     this.ship.quaternion.copy(this.shipQuaternion)
     
-    // Brake animation
     const targetBrake = this.brakesActive ? 1.0 : 0.0
     this.brakeFactor += (targetBrake - this.brakeFactor) * 0.15
   }
@@ -429,7 +455,6 @@ export class SpaceEngine {
   }
 
   private updateCamera() {
-    // Smooth follow
     const offset = this.camera.position.clone().sub(this.ship.position)
     const targetOffset = offset.clone().normalize().multiplyScalar(Math.min(offset.length(), 20))
     this.camera.position.copy(this.ship.position).add(targetOffset)
@@ -437,7 +462,6 @@ export class SpaceEngine {
   }
 
   private updateHUD() {
-    // Find nearest body
     let nearestName = ''
     let nearestDist = Infinity
     
@@ -460,8 +484,8 @@ export class SpaceEngine {
       distance: this.distanceTraveled,
       nearestBody: { name: nearestName, distance: nearestDist },
       panelStatus: this.brakesActive ? 'DEPLOYED' : 'RETRACTED',
-      flashlight: false,
-      headlights: false,
+      flashlight: this.flashlightEnabled,
+      headlights: this.headlightsEnabled,
     })
   }
 
@@ -497,9 +521,64 @@ export class SpaceEngine {
     }
   }
 
+  setCommandCallback(callback: (cmd: string) => void) {
+    this.commandCallback = callback
+  }
+
+  executeCommand(cmd: string): string {
+    const parts = cmd.trim().split(/\s+/)
+    const command = parts[0].toLowerCase()
+    
+    switch (command) {
+      case 'spawn':
+        if (parts[1] === 'star') {
+          return 'Star spawning not yet implemented'
+        }
+        if (parts.length === 4) {
+          const x = parseFloat(parts[1])
+          const y = parseFloat(parts[2])
+          const z = parseFloat(parts[3])
+          this.ship.position.set(x, y, z)
+          return `Teleported to ${x}, ${y}, ${z}`
+        }
+        return 'Usage: spawn [x] [y] [z] | spawn star [type]'
+        
+      case 'speed':
+        if (parts[1]) {
+          const speed = parseFloat(parts[1])
+          this.shipVelocity.setLength(speed * this.VISUAL_SCALE)
+          return `Speed set to ${speed} km/s`
+        }
+        return 'Usage: speed [km/s]'
+        
+      case 'warp':
+        if (parts[1]) {
+          this.timeWarp = parseFloat(parts[1])
+          return `Time warp set to ${this.timeWarp}x`
+        }
+        return 'Usage: warp [multiplier]'
+        
+      case 'clear':
+        return '__CLEAR__'
+        
+      case 'close':
+        this.terminalOpen = false
+        if (this.commandCallback) this.commandCallback('__CLOSE__')
+        return 'Terminal closed'
+        
+      default:
+        return `Unknown command: ${command}`
+    }
+  }
+
+  isTerminalOpen(): boolean {
+    return this.terminalOpen
+  }
+
   destroy() {
     this.isRunning = false
     window.removeEventListener('resize', this.onResize)
+    this.audio.destroy()
     this.renderer.dispose()
     this.container.removeChild(this.renderer.domElement)
   }
