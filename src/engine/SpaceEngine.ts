@@ -411,6 +411,25 @@ export class SpaceEngine {
         this.cycleTarget()
       }
       
+      if (e.key === 'w' || e.key === 'W') {
+        // Move camera forward (zoom in)
+        this.camera.position.multiplyScalar(0.95)
+        this.camera.position.clampLength(2, 150)
+      }
+      if (e.key === 's' || e.key === 'S') {
+        // Move camera backward (zoom out)
+        this.camera.position.multiplyScalar(1.05)
+        this.camera.position.clampLength(2, 150)
+      }
+      if (e.key === 'a' || e.key === 'A') {
+        // Orbit camera left
+        this.camera.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), 0.05)
+      }
+      if (e.key === 'd' || e.key === 'D') {
+        // Orbit camera right
+        this.camera.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), -0.05)
+      }
+      
       if (e.key === 'r' || e.key === 'R') {
         this.camera.position.set(0, 5, 15)
         showNotification('Camera reset', 'info')
